@@ -1,0 +1,7 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <file>sprites/explorer1.png</file>
+        <file>sprites/explorer2.png</file>
+    </qresource>
+</RCC>

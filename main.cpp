@@ -5,6 +5,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QFocusEvent>
 #include <QPainterPath>
 #include <QPixmap>
@@ -222,7 +223,16 @@ public:
 
     const QSet<int>& pressedKeys() const { return m_pressedKeys; }
 
+signals:
+    void clicked();
+
 protected:
+    void mousePressEvent(QMouseEvent* e) override
+    {
+        emit clicked();
+        QGraphicsView::mousePressEvent(e);
+    }
+
     void keyPressEvent(QKeyEvent* e) override
     {
         if (e->isAutoRepeat())
@@ -361,6 +371,8 @@ public:
         };
         for (const R& r : rects)
             m_scene->addItem(new Wall(r.x, r.y, r.w, r.h));
+        m_exit = m_scene->addRect(700, 60, 60, 60, QPen(QColor(30, 110, 40), 2), QBrush(QColor(80, 200, 100)));
+        m_exit->setZValue(1);
     }
 
     void setPlayers(Player* p1, Player* p2) { m_p1 = p1; m_p2 = p2; }
@@ -369,6 +381,23 @@ public:
     QPointF spawnP1() const      { return m_spawn1; }
     QPointF spawnP2() const      { return m_spawn2; }
     int     restartCount() const { return m_restartCount; }
+
+    void setClueTotal(int n) { m_cluesTotal = n; }
+    void clueFound()         { ++m_cluesFound; }
+    bool allCluesFound() const { return m_cluesFound >= m_cluesTotal; }
+
+    bool bothAtExit() const
+    {
+        if (!m_p1 || !m_p2 || !m_exit)
+            return false;
+        return m_p1->collidesWithItem(m_exit) && m_p2->collidesWithItem(m_exit);
+    }
+
+    void checkExit()
+    {
+        if (allCluesFound() && bothAtExit())
+            emit levelComplete();
+    }
 
 public slots:
     void restart()
@@ -381,6 +410,7 @@ public slots:
 
 signals:
     void restarted();
+    void levelComplete();
 
 private:
     QGraphicsScene* m_scene;
@@ -390,6 +420,9 @@ private:
     QPointF m_spawn1{60, 520};
     QPointF m_spawn2{110, 520};
     int m_restartCount = 0;
+    QGraphicsRectItem* m_exit = nullptr;
+    int m_cluesFound = 0;
+    int m_cluesTotal = 0;
 };
 
 class Game : public QObject
@@ -426,6 +459,14 @@ public:
         m_hud->setLevel(m_level->number());
 
         connect(&m_timer, &QTimer::timeout, this, &Game::tick);
+        m_startText = m_scene->addSimpleText("Click to start");
+        m_startText->setBrush(QColor(60, 40, 20));
+        m_startText->setFont(QFont("Arial", 32, QFont::Bold));
+        m_startText->setZValue(50);
+        m_startText->setPos((800 - m_startText->boundingRect().width()) / 2, 270);
+
+        connect(m_view, &GameView::clicked, this, &Game::beginGame);
+        connect(m_level, &Level::levelComplete, this, &Game::finishLevel);
     }
 
     ~Game() override { delete m_view; }
@@ -434,7 +475,6 @@ public:
     {
         m_view->show();
         m_view->setFocus();
-        m_timer.start(16);
     }
 
     Player* player1() const { return m_player1; }
@@ -442,11 +482,34 @@ public:
     Level*  level()   const { return m_level; }
 
 public slots:
+    void beginGame()
+    {
+        if (m_started)
+            return;
+        m_started = true;
+        m_scene->removeItem(m_startText);
+        delete m_startText;
+        m_startText = nullptr;
+        m_timer.start(16);
+        m_view->setFocus();
+    }
     void tick()
     {
         const QSet<int>& keys = m_view->pressedKeys();
         m_player1->update(keys);
         m_player2->update(keys);
+        m_level->checkExit();
+    }
+
+    void finishLevel()
+    {
+        m_timer.stop();
+        QString msg = "Level " + QString::number(m_level->number()) + " Complete!";
+        m_doneText = m_scene->addSimpleText(msg);
+        m_doneText->setBrush(QColor(60, 40, 20));
+        m_doneText->setFont(QFont("Arial", 32, QFont::Bold));
+        m_doneText->setZValue(50);
+        m_doneText->setPos((800 - m_doneText->boundingRect().width()) / 2, 270);
     }
 
 private:
@@ -457,6 +520,9 @@ private:
     Level*          m_level   = nullptr;
     HUD*            m_hud     = nullptr;
     QTimer          m_timer;
+    QGraphicsSimpleTextItem* m_startText = nullptr;
+    bool            m_started = false;
+    QGraphicsSimpleTextItem* m_doneText = nullptr;
 };
 
 int main(int argc, char* argv[])

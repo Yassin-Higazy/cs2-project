@@ -370,7 +370,12 @@ public:
             {620, 120, 16, 200}, {260, 440, 140, 16},
         };
         for (const R& r : rects)
-            m_scene->addItem(new Wall(r.x, r.y, r.w, r.h));
+
+        {
+            Wall* w = new Wall(r.x, r.y, r.w, r.h);
+            m_scene->addItem(w);
+            m_walls.append(w);
+        }
         m_exit = m_scene->addRect(700, 60, 60, 60, QPen(QColor(30, 110, 40), 2), QBrush(QColor(80, 200, 100)));
         m_exit->setZValue(1);
     }
@@ -399,6 +404,27 @@ public:
             emit levelComplete();
     }
 
+    void nextLevel()
+    {
+        for (QGraphicsItem* w : m_walls)
+        {
+            m_scene->removeItem(w);
+            delete w;
+        }
+        m_walls.clear();
+        m_scene->removeItem(m_exit);
+        delete m_exit;
+        m_exit = nullptr;
+
+        ++m_number;
+        m_cluesFound = 0;
+        m_cluesTotal = 0;
+        build();
+
+        if (m_p1) m_p1->reset();
+        if (m_p2) m_p2->reset();
+    }
+
 public slots:
     void restart()
     {
@@ -423,6 +449,7 @@ private:
     QGraphicsRectItem* m_exit = nullptr;
     int m_cluesFound = 0;
     int m_cluesTotal = 0;
+    QList<QGraphicsItem*> m_walls;
 };
 
 class Game : public QObject
@@ -467,6 +494,7 @@ public:
 
         connect(m_view, &GameView::clicked, this, &Game::beginGame);
         connect(m_level, &Level::levelComplete, this, &Game::finishLevel);
+        connect(m_view, &GameView::clicked, this, &Game::goNext);
     }
 
     ~Game() override { delete m_view; }
@@ -504,12 +532,27 @@ public slots:
     void finishLevel()
     {
         m_timer.stop();
-        QString msg = "Level " + QString::number(m_level->number()) + " Complete!";
+        QString msg = "Level " + QString::number(m_level->number()) + " Complete!\nClick to continue";
         m_doneText = m_scene->addSimpleText(msg);
         m_doneText->setBrush(QColor(60, 40, 20));
         m_doneText->setFont(QFont("Arial", 32, QFont::Bold));
         m_doneText->setZValue(50);
         m_doneText->setPos((800 - m_doneText->boundingRect().width()) / 2, 270);
+        m_waitingNext = true;
+    }
+
+    void goNext()
+    {
+        if (!m_waitingNext)
+            return;
+        m_waitingNext = false;
+        m_scene->removeItem(m_doneText);
+        delete m_doneText;
+        m_doneText = nullptr;
+        m_level->nextLevel();
+        m_hud->setLevel(m_level->number());
+        m_timer.start(16);
+        m_view->setFocus();
     }
 
 private:
@@ -523,6 +566,7 @@ private:
     QGraphicsSimpleTextItem* m_startText = nullptr;
     bool            m_started = false;
     QGraphicsSimpleTextItem* m_doneText = nullptr;
+    bool            m_waitingNext = false;
 };
 
 int main(int argc, char* argv[])

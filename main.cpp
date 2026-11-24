@@ -5,6 +5,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsSimpleTextItem>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QFocusEvent>
 #include <QPainterPath>
 #include <QPixmap>
@@ -17,195 +18,16 @@
 #include <QFont>
 #include <algorithm>
 
-class Wall : public QGraphicsRectItem
-{
-public:
-    Wall(qreal x, qreal y, qreal w, qreal h)
-        : QGraphicsRectItem(0, 0, w, h)
-    {
-        setPos(x, y);
-        setBrush(QBrush(QColor(95, 80, 60)));
-        setPen(QPen(QColor(60, 50, 35), 2));
-        setZValue(5);
-    }
-};
-
-class Player : public QObject, public QGraphicsPixmapItem
-{
-    Q_OBJECT
-
-public:
-    enum Facing { Down = 0, Left = 1, Right = 2, Up = 3 };
-
-    Player(int id, QPointF spawn, const QString& spritePath, QObject* parent = nullptr)
-        : QObject(parent), m_id(id), m_spawn(spawn)
-    {
-        loadFrames(spritePath);
-        setPixmap(m_frames[m_facing][0]);
-        setPos(m_spawn);
-        setZValue(10);
-    }
-
-    void setKeys(int up, int down, int left, int right)
-    {
-        m_keyUp = up;  m_keyDown = down;  m_keyLeft = left;  m_keyRight = right;
-    }
-    void setSpawn(QPointF spawn) { m_spawn = spawn; }
-
-    int  id() const        { return m_id; }
-    int  health() const    { return m_health; }
-    int  maxHealth() const { return m_maxHealth; }
-
-    void update(const QSet<int>& keys)
-    {
-        qreal dx = 0, dy = 0;
-        if (keys.contains(m_keyLeft))  { dx -= m_speed; m_facing = Left;  }
-        if (keys.contains(m_keyRight)) { dx += m_speed; m_facing = Right; }
-        if (keys.contains(m_keyUp))    { dy -= m_speed; m_facing = Up;    }
-        if (keys.contains(m_keyDown))  { dy += m_speed; m_facing = Down;  }
-
-        bool moving = (dx != 0 || dy != 0);
-
-        if (moving) {
-            tryMove(dx, 0);
-            tryMove(0, dy);
-        }
-
-        if (m_damageCooldown > 0)
-            --m_damageCooldown;
-
-        advanceAnimation(moving);
-        updateBlink();
-    }
-
-    void takeDamage(int amount)
-    {
-        if (amount <= 0 || m_health <= 0)
-            return;
-        if (m_damageCooldown > 0)
-            return;
-
-        m_health = std::max(0, m_health - amount);
-        m_damageCooldown = kDamageCooldownTicks;
-        emit healthChanged(m_health);
-
-        if (m_health == 0)
-            emit died();
-    }
-
-    void reset()
-    {
-        m_health = m_maxHealth;
-        m_damageCooldown = 0;
-
-        setPos(m_spawn);
-
-        m_facing = Down;
-        m_frameIndex = 0;
-        m_frameCounter = 0;
-        setPixmap(m_frames[m_facing][0]);
-        setOpacity(1.0);
-
-        emit healthChanged(m_health);
-    }
-
-    QPainterPath shape() const override
-    {
-        QPainterPath path;
-        path.addRect(8, 4, 16, 26);
-        return path;
-    }
-
-signals:
-    void healthChanged(int newHealth);
-    void died();
-
-private:
-    int m_id;
-
-    int     m_keyUp = 0, m_keyDown = 0, m_keyLeft = 0, m_keyRight = 0;
-    qreal   m_speed = 3;
-    QPointF m_spawn;
-
-    int m_health = 100;
-    int m_maxHealth = 100;
-    int m_damageCooldown = 0;
-    static constexpr int kDamageCooldownTicks = 30;
-
-    QVector<QPixmap> m_frames[4];
-    Facing m_facing = Down;
-    int    m_frameIndex = 0;
-    int    m_frameCounter = 0;
-    static constexpr int kTicksPerFrame = 6;
-    static constexpr int kFrameW = 32, kFrameH = 32, kFramesPerRow = 3;
-
-    void loadFrames(const QString& spritePath)
-    {
-        QPixmap sheet(spritePath);
-        for (int dir = 0; dir < 4; ++dir) {
-            for (int f = 0; f < kFramesPerRow; ++f) {
-                if (!sheet.isNull()) {
-                    m_frames[dir].push_back(
-                        sheet.copy(f * kFrameW, dir * kFrameH, kFrameW, kFrameH));
-                } else {
-                    QPixmap px(kFrameW, kFrameH);
-                    px.fill(m_id == 1 ? Qt::red : Qt::blue);
-                    m_frames[dir].push_back(px);
-                }
-            }
-        }
-    }
-
-    bool tryMove(qreal dx, qreal dy)
-    {
-        if (dx == 0 && dy == 0)
-            return false;
-
-        const QPointF old = pos();
-        moveBy(dx, dy);
-
-        const QList<QGraphicsItem*> hits = collidingItems();
-        for (QGraphicsItem* item : hits) {
-            if (dynamic_cast<Wall*>(item)) {
-                setPos(old);
-                return false;
-            }
-        }
-
-        if (scene()) {
-            const QRectF bounds = scene()->sceneRect();
-            const QRectF box = mapRectToScene(shape().boundingRect());
-            if (!bounds.contains(box)) {
-                setPos(old);
-                return false;
-            }
-        }
-        return true;
-    }
-
-    void advanceAnimation(bool moving)
-    {
-        if (!moving) {
-            m_frameIndex = 0;
-            m_frameCounter = 0;
-            setPixmap(m_frames[m_facing][0]);
-            return;
-        }
-        if (++m_frameCounter % kTicksPerFrame == 0)
-            m_frameIndex = (m_frameIndex == 1) ? 2 : 1;
-        if (m_frameIndex == 0)
-            m_frameIndex = 1;
-        setPixmap(m_frames[m_facing][m_frameIndex]);
-    }
-
-    void updateBlink()
-    {
-        if (m_damageCooldown > 0)
-            setOpacity((m_damageCooldown / 4) % 2 == 0 ? 1.0 : 0.4);
-        else
-            setOpacity(1.0);
-    }
-};
+#include "wall.h"
+#include "player.h"
+#include "clue.h"
+#include "cluetracker.h"
+#include "cluehud.h"
+#include "puzzle.h"
+#include "twinsealspuzzle.h"
+#include "glyphfloorpuzzle.h"
+#include "hazard.h"
+#include "spiketrap.h"
 
 class GameView : public QGraphicsView
 {
@@ -222,7 +44,16 @@ public:
 
     const QSet<int>& pressedKeys() const { return m_pressedKeys; }
 
+signals:
+    void clicked();
+
 protected:
+    void mousePressEvent(QMouseEvent* e) override
+    {
+        emit clicked();
+        QGraphicsView::mousePressEvent(e);
+    }
+
     void keyPressEvent(QKeyEvent* e) override
     {
         if (e->isAutoRepeat())
@@ -361,6 +192,8 @@ public:
         };
         for (const R& r : rects)
             m_scene->addItem(new Wall(r.x, r.y, r.w, r.h));
+        m_exit = m_scene->addRect(700, 60, 60, 60, QPen(QColor(30, 110, 40), 2), QBrush(QColor(80, 200, 100)));
+        m_exit->setZValue(1);
     }
 
     void setPlayers(Player* p1, Player* p2) { m_p1 = p1; m_p2 = p2; }
@@ -370,10 +203,28 @@ public:
     QPointF spawnP2() const      { return m_spawn2; }
     int     restartCount() const { return m_restartCount; }
 
+    void setClueTotal(int n) { m_cluesTotal = n; }
+    void clueFound()         { ++m_cluesFound; }
+    bool allCluesFound() const { return m_cluesFound >= m_cluesTotal; }
+
+    bool bothAtExit() const
+    {
+        if (!m_p1 || !m_p2 || !m_exit)
+            return false;
+        return m_p1->collidesWithItem(m_exit) && m_p2->collidesWithItem(m_exit);
+    }
+
+    void checkExit()
+    {
+        if (allCluesFound() && bothAtExit())
+            emit levelComplete();
+    }
+
 public slots:
     void restart()
     {
         ++m_restartCount;
+        m_cluesFound = 0;
         if (m_p1) m_p1->reset();
         if (m_p2) m_p2->reset();
         emit restarted();
@@ -381,6 +232,7 @@ public slots:
 
 signals:
     void restarted();
+    void levelComplete();
 
 private:
     QGraphicsScene* m_scene;
@@ -390,6 +242,9 @@ private:
     QPointF m_spawn1{60, 520};
     QPointF m_spawn2{110, 520};
     int m_restartCount = 0;
+    QGraphicsRectItem* m_exit = nullptr;
+    int m_cluesFound = 0;
+    int m_cluesTotal = 0;
 };
 
 class Game : public QObject
@@ -425,7 +280,43 @@ public:
         m_hud = new HUD(m_scene, m_player1, m_player2, this);
         m_hud->setLevel(m_level->number());
 
+        // puzzles, traps and clues
+        m_clues = new ClueTracker(this);
+        m_clueHud = new ClueHUD(m_scene, m_clues, this);
+
+        m_puzzles.append(new TwinSealsPuzzle(m_scene, 1, this));
+        m_puzzles.append(new GlyphFloorPuzzle(m_scene, 1, this));
+        m_level->setClueTotal(2);
+
+        // spike traps in two corridors, the second one is half a cycle behind
+        m_hazards.append(new SpikeTrap(296, 456, 48, 128, 10, 0));
+        m_hazards.append(new SpikeTrap(548, 280, 48, 112, 10, 75));
+        for (int i = 0; i < m_hazards.size(); i++)
+            m_scene->addItem(m_hazards[i]);
+
+        // a clue goes to the tracker and counts for the level exit
+        for (int i = 0; i < m_puzzles.size(); i++) {
+            connect(m_puzzles[i], &Puzzle::clueEarned, m_clues, &ClueTracker::addClue);
+            connect(m_puzzles[i], &Puzzle::clueEarned, m_level, &Level::clueFound);
+            connect(m_level, &Level::restarted, m_puzzles[i], &Puzzle::reset);
+        }
+
+        // on restart the traps start over and level 1 clues are lost
+        connect(m_level, &Level::restarted, this, [this]() {
+            for (int i = 0; i < m_hazards.size(); i++)
+                m_hazards[i]->reset();
+            m_clues->removeLevelClues(1);
+        });
+
         connect(&m_timer, &QTimer::timeout, this, &Game::tick);
+        m_startText = m_scene->addSimpleText("Click to start");
+        m_startText->setBrush(QColor(60, 40, 20));
+        m_startText->setFont(QFont("Arial", 32, QFont::Bold));
+        m_startText->setZValue(50);
+        m_startText->setPos((800 - m_startText->boundingRect().width()) / 2, 270);
+
+        connect(m_view, &GameView::clicked, this, &Game::beginGame);
+        connect(m_level, &Level::levelComplete, this, &Game::finishLevel);
     }
 
     ~Game() override { delete m_view; }
@@ -434,7 +325,6 @@ public:
     {
         m_view->show();
         m_view->setFocus();
-        m_timer.start(16);
     }
 
     Player* player1() const { return m_player1; }
@@ -442,11 +332,39 @@ public:
     Level*  level()   const { return m_level; }
 
 public slots:
+    void beginGame()
+    {
+        if (m_started)
+            return;
+        m_started = true;
+        m_scene->removeItem(m_startText);
+        delete m_startText;
+        m_startText = nullptr;
+        m_timer.start(16);
+        m_view->setFocus();
+    }
     void tick()
     {
         const QSet<int>& keys = m_view->pressedKeys();
         m_player1->update(keys);
         m_player2->update(keys);
+        for (int i = 0; i < m_puzzles.size(); i++)
+            m_puzzles[i]->tick(m_player1, m_player2);
+        for (int i = 0; i < m_hazards.size(); i++)
+            m_hazards[i]->tick(m_player1, m_player2);
+        m_clueHud->step(keys);
+        m_level->checkExit();
+    }
+
+    void finishLevel()
+    {
+        m_timer.stop();
+        QString msg = "Level " + QString::number(m_level->number()) + " Complete!";
+        m_doneText = m_scene->addSimpleText(msg);
+        m_doneText->setBrush(QColor(60, 40, 20));
+        m_doneText->setFont(QFont("Arial", 32, QFont::Bold));
+        m_doneText->setZValue(50);
+        m_doneText->setPos((800 - m_doneText->boundingRect().width()) / 2, 270);
     }
 
 private:
@@ -456,7 +374,14 @@ private:
     Player*         m_player2 = nullptr;
     Level*          m_level   = nullptr;
     HUD*            m_hud     = nullptr;
+    ClueTracker*    m_clues   = nullptr;
+    QList<Puzzle*>  m_puzzles;
+    QList<Hazard*>  m_hazards;
+    ClueHUD*        m_clueHud = nullptr;
     QTimer          m_timer;
+    QGraphicsSimpleTextItem* m_startText = nullptr;
+    bool            m_started = false;
+    QGraphicsSimpleTextItem* m_doneText = nullptr;
 };
 
 int main(int argc, char* argv[])

@@ -10,6 +10,19 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_add_executable(LostExpedition MANUAL_FINALIZATION
     main.cpp
+    wall.h
+    player.h
+    clue.h
+    cluetracker.h cluetracker.cpp
+    cluehud.h cluehud.cpp
+    pressureplate.h pressureplate.cpp
+    cluepickup.h cluepickup.cpp
+    puzzle.h puzzle.cpp
+    twinsealspuzzle.h twinsealspuzzle.cpp
+    glyphfloorpuzzle.h glyphfloorpuzzle.cpp
+    hazard.h hazard.cpp
+    spiketrap.h spiketrap.cpp
+    vaultgate.h vaultgate.cpp
     resources.qrc
 )
 target_link_libraries(LostExpedition PRIVATE Qt6::Widgets)
